@@ -1,56 +1,85 @@
 #!/bin/bash
 #
 # setup-virtualbox-t4nos.sh
-# Script instalasi VirtualBox (virtualbox-ose) untuk T4n OS (basis Void Linux).
+# VirtualBox (virtualbox-ose) installer script for T4n OS (Void Linux based).
 #
-# Penggunaan:
+# Usage:
 #   bash setup-virtualbox-t4nos.sh
 #
-# Catatan:
-# - Jangan jalankan dengan sudo, script akan minta password sendiri saat perlu.
-# - Jika kernel baru saja terupdate, reboot dulu sebelum menjalankan script ini,
-#   supaya kernel yang berjalan sinkron dengan linux-headers yang akan dipasang.
+# Notes:
+# - Do not run this with sudo; the script will prompt for a password itself when needed.
+# - If the kernel was recently updated, reboot before running this script,
+#   so the running kernel matches the linux-headers that will be installed.
 
 set -e
 
-echo "==> Update repository dan sistem"
+echo "==> Updating repository and system"
 sudo xbps-install -Su
 
 RUNNING_KERNEL="$(uname -r)"
-echo "==> Kernel yang sedang berjalan: ${RUNNING_KERNEL}"
+echo "==> Currently running kernel: ${RUNNING_KERNEL}"
 
-echo "==> Memasang linux-headers"
+echo "==> Installing linux-headers"
 sudo xbps-install -S linux-headers
 
-# Cek apakah header untuk kernel yang sedang berjalan tersedia.
+# Check whether headers for the currently running kernel are available.
 HEADER_DIR="/usr/lib/modules/${RUNNING_KERNEL}/build"
 if [ ! -d "${HEADER_DIR}" ]; then
     echo
-    echo "PERINGATAN: Header untuk kernel ${RUNNING_KERNEL} tidak ditemukan di ${HEADER_DIR}."
-    echo "Kemungkinan kernel baru saja terupdate tapi sistem belum di-reboot."
-    echo "Silakan reboot, lalu jalankan ulang script ini."
+    echo "WARNING: Headers for kernel ${RUNNING_KERNEL} were not found at ${HEADER_DIR}."
+    echo "The kernel was likely updated recently but the system hasn't been rebooted yet."
+    echo "Please reboot, then run this script again."
     exit 1
 fi
 
-echo "==> Memasang virtualbox-ose dan virtualbox-ose-dkms"
+echo "==> Installing virtualbox-ose and virtualbox-ose-dkms"
 sudo xbps-install -S virtualbox-ose virtualbox-ose-dkms
 
-echo "==> Menambahkan user ${USER} ke grup vboxusers"
-sudo usermod -aG vboxusers "${USER}"
-
-echo "==> Build dan load module kernel VirtualBox"
-sudo dkms autoinstall
-sudo modprobe vboxdrv
-
-echo "==> Verifikasi module"
-if lsmod | grep -q vboxdrv; then
-    echo "OK: module vboxdrv berhasil dimuat."
-else
-    echo "GAGAL: module vboxdrv tidak terdeteksi. Cek 'sudo dkms status' untuk detail."
+echo "==> Verifying the vboxusers group exists"
+if ! getent group vboxusers > /dev/null; then
+    echo "FAILED: vboxusers group not found. Check the virtualbox-ose installation."
     exit 1
 fi
 
+echo "==> Adding user ${USER} to the vboxusers group"
+sudo usermod -aG vboxusers "${USER}"
+
+echo "==> Building VirtualBox kernel modules via DKMS"
+sudo dkms autoinstall
+
+echo "==> Verifying DKMS build for the running kernel"
+if ! sudo dkms status | grep -q "${RUNNING_KERNEL}.*installed"; then
+    echo "FAILED: vboxdrv module for kernel ${RUNNING_KERNEL} did not build successfully."
+    echo "Check details with: sudo dkms status"
+    exit 1
+fi
+
+echo "==> Loading the vboxdrv kernel module"
+VBOXDRV_ERR="$(mktemp)"
+if ! sudo modprobe vboxdrv 2>"${VBOXDRV_ERR}"; then
+    echo "FAILED to load vboxdrv."
+    if grep -qi "key was rejected" "${VBOXDRV_ERR}"; then
+        echo "This looks like a Secure Boot issue — the DKMS-built module is unsigned."
+        echo "Either disable Secure Boot in the BIOS/UEFI settings, or enroll a MOK key"
+        echo "to sign the DKMS module and try again."
+    fi
+    rm -f "${VBOXDRV_ERR}"
+    exit 1
+fi
+rm -f "${VBOXDRV_ERR}"
+
+echo "==> Verifying module is loaded"
+if lsmod | grep -q vboxdrv; then
+    echo "OK: vboxdrv module loaded successfully."
+else
+    echo "FAILED: vboxdrv module not detected. Check 'sudo dkms status' for details."
+    exit 1
+fi
+
+echo "==> Enabling vboxdrv to load automatically on boot"
+echo "vboxdrv" | sudo tee /etc/modules-load.d/virtualbox.conf > /dev/null
+
 echo
-echo "==> Setup selesai."
-echo "Logout/login ulang (atau reboot) agar keanggotaan grup vboxusers aktif,"
-echo "lalu buka VirtualBox dari menu aplikasi."
+echo "==> Setup complete."
+echo "Log out/in again (or reboot) for vboxusers group membership to take effect,"
+echo "then open VirtualBox from the application menu."
