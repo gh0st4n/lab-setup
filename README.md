@@ -52,7 +52,8 @@ keanggotaan grup baru (`vboxusers`, `libvirt`, `kvm`) berlaku.
 
 - `linux-headers`, `virtualbox-ose`, `virtualbox-ose-dkms`
 - User ditambahkan ke grup `vboxusers`
-- `vboxdrv` dimuat sekarang dan setiap boot (`/etc/modules-load.d/virtualbox.conf`)
+- `vboxdrv`, `vboxnetflt` (Bridged Adapter), dan `vboxnetadp` (Host-only)
+  dimuat sekarang dan setiap boot (`/etc/modules-load.d/virtualbox.conf`)
 
 **virt-manager**
 
@@ -76,6 +77,22 @@ keanggotaan grup baru (`vboxusers`, `libvirt`, `kvm`) berlaku.
 - `virbr0` akan berstatus `NO-CARRIER` / `DOWN` selama belum ada VM yang
   terhubung ke jaringan `default`. Ini normal.
 
+## Menjalankan T4n OS sebagai Guest di VirtualBox
+
+- **Graphics Controller:** gunakan **VBoxSVGA** (Settings → Display).
+  Dengan **VMSVGA**, kernel guest memuat driver `vmwgfx` yang menolak jalan
+  di VirtualBox dan menampilkan error `vmwgfx seems to be running on an
+  unsupported hypervisor`. Boot tetap lanjut, tetapi grafis bisa kurang
+  optimal.
+- **Guest Additions:** di dalam guest install `virtualbox-ose-guest` dan
+  `virtualbox-ose-guest-dkms`, lalu aktifkan service `vboxservice`
+  (`sudo ln -s /etc/sv/vboxservice /var/service/`). Ini memberi resolusi
+  otomatis, clipboard bersama, dan mouse integration.
+- **Jaringan:** Bridged Adapter pada WiFi sering tidak stabil karena banyak
+  access point menolak beberapa MAC address dari satu klien. Jika VM tidak
+  mendapat IP, pakai **NAT**, atau **Host-only + NAT** (dua adapter) yang
+  lebih stabil dan lebih terisolasi untuk lab.
+
 ## Troubleshooting
 
 | Masalah | Cek |
@@ -83,6 +100,7 @@ keanggotaan grup baru (`vboxusers`, `libvirt`, `kvm`) berlaku.
 | virt-manager tidak bisa terhubung ke `qemu:///system` | `sudo sv status libvirtd`, dan pastikan user ada di grup `libvirt` (login ulang) |
 | VM tidak ada internet | `cat /proc/sys/net/ipv4/ip_forward` harus `1`; cek aturan firewall untuk NAT |
 | `/dev/kvm` tidak ada | Aktifkan VT-x/AMD-V di BIOS/UEFI, atau `sudo modprobe kvm_intel` / `kvm_amd` |
+| VM gagal start dengan `VERR_SUPDRV_COMPONENT_NOT_FOUND` (Bridged/Host-only) | `lsmod \| grep vbox` harus menampilkan `vboxdrv`, `vboxnetflt`, `vboxnetadp`; jika belum: `sudo modprobe vboxnetflt vboxnetadp` |
 | `vboxdrv` gagal di-build | `sudo dkms status`; pastikan header sesuai dengan `uname -r` |
 
 ## Disclaimer

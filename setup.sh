@@ -135,30 +135,39 @@ install_virtualbox() {
         exit 1
     fi
 
-    echo "==> Loading the vboxdrv kernel module"
-    VBOXDRV_ERR="$(mktemp)"
-    if ! sudo modprobe vboxdrv 2>"${VBOXDRV_ERR}"; then
-        echo "FAILED to load vboxdrv."
-        if grep -qi "key was rejected" "${VBOXDRV_ERR}"; then
-            echo "This looks like a Secure Boot issue — the DKMS-built module is unsigned."
-            echo "Either disable Secure Boot in the BIOS/UEFI settings, or enroll a MOK key"
-            echo "to sign the DKMS module and try again."
+    # vboxdrv      : main driver
+    # vboxnetflt   : Bridged Adapter (net filter)
+    # vboxnetadp   : Host-only adapter
+    VBOX_MODULES="vboxdrv vboxnetflt vboxnetadp"
+
+    echo "==> Loading VirtualBox kernel modules"
+    for mod in ${VBOX_MODULES}; do
+        MOD_ERR="$(mktemp)"
+        if ! sudo modprobe "${mod}" 2>"${MOD_ERR}"; then
+            echo "FAILED to load ${mod}."
+            if grep -qi "key was rejected" "${MOD_ERR}"; then
+                echo "This looks like a Secure Boot issue — the DKMS-built module is unsigned."
+                echo "Either disable Secure Boot in the BIOS/UEFI settings, or enroll a MOK key"
+                echo "to sign the DKMS module and try again."
+            fi
+            rm -f "${MOD_ERR}"
+            exit 1
         fi
-        rm -f "${VBOXDRV_ERR}"
-        exit 1
-    fi
-    rm -f "${VBOXDRV_ERR}"
+        rm -f "${MOD_ERR}"
+    done
 
-    echo "==> Verifying module is loaded"
-    if lsmod | grep -q vboxdrv; then
-        echo "OK: vboxdrv module loaded successfully."
-    else
-        echo "FAILED: vboxdrv module not detected. Check 'sudo dkms status' for details."
-        exit 1
-    fi
+    echo "==> Verifying modules are loaded"
+    for mod in ${VBOX_MODULES}; do
+        if lsmod | grep -q "^${mod}"; then
+            echo "OK: ${mod} loaded."
+        else
+            echo "FAILED: ${mod} not detected. Check 'sudo dkms status' for details."
+            exit 1
+        fi
+    done
 
-    echo "==> Enabling vboxdrv to load automatically on boot"
-    echo "vboxdrv" | sudo tee /etc/modules-load.d/virtualbox.conf > /dev/null
+    echo "==> Enabling VirtualBox modules to load automatically on boot"
+    printf '%s\n' ${VBOX_MODULES} | sudo tee /etc/modules-load.d/virtualbox.conf > /dev/null
 
     echo "==> VirtualBox setup complete."
 }
@@ -287,6 +296,8 @@ echo "==> All done."
 echo "Log out/in again (or reboot) for group membership to take effect"
 if [ "${DO_VBOX}" -eq 1 ]; then
     echo "  - VirtualBox: open it from the application menu."
+    echo "    Tip: set Graphics Controller to VBoxSVGA for Linux guests, and use NAT"
+    echo "    (or Host-only + NAT) if Bridged Adapter on WiFi gives no network."
 fi
 if [ "${DO_VIRTM}" -eq 1 ]; then
     echo "  - virt-manager: run 'virt-manager' and connect to qemu:///system."
